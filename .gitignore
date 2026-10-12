@@ -1,0 +1,40 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment files and credentials
+.env
+.env.*
+.env.example
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+tests/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Non-deliverable candidate kit materials
+# (Deliverables are strictly app/main.py, requirements.txt, README.md, REVIEW.md, DECISIONS.md)
+sample_data/
+sample_seed.py
+openapi.yaml
+DATA_MODEL.md
+PROBLEM_STATEMENT.docx
+app/__init__.py
+
