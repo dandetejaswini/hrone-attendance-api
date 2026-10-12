@@ -29,8 +29,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# Non-deliverable candidate kit materials
-# (Deliverables are strictly app/main.py, requirements.txt, README.md, REVIEW.md, DECISIONS.md)
 sample_data/
 sample_seed.py
 openapi.yaml
