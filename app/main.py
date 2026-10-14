@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal, Optional
 
-from bson import Decimal128, ObjectId
+from bson import Decimal128, ObjectId, Timestamp
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -1720,6 +1720,10 @@ def _serialise_bson_value(val: Any) -> Any:
     if isinstance(val, Decimal):
         return float(val) if "." in str(val) else int(val)
     if isinstance(val, ObjectId):
+        return str(val)
+    if isinstance(val, Timestamp):
+        return val.as_datetime().isoformat()
+    if not isinstance(val, (int, float, str, bool, type(None))):
         return str(val)
     return val
 
