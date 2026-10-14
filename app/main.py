@@ -2,9 +2,7 @@
 Employee Attendance & Analytics API
 
 Run:  uvicorn app.main:app --port 8000
-Env:  MONGO_URI, MONGO_DB  (loaded from .env; real environment variables take priority)
-
-Phase 4 — operations, concurrency OCC, analytics, and explain endpoint implemented.
+Env:  MONGO_URI, MONGO_DB (loaded from .env; real environment variables take priority)
 """
 import calendar
 import os
@@ -22,18 +20,14 @@ from pydantic import BaseModel, Field, model_validator
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
-# ---------------------------------------------------------------------------
 # Configuration
-# ---------------------------------------------------------------------------
 load_dotenv()
 
 IST = timezone(timedelta(hours=5, minutes=30))
 _EPOCH_MIN = 100_000_000_000   # smallest valid epoch-ms (avoids seconds-era ints)
 _EPOCH_MAX = 4_102_444_800_000  # 2100-01-01T00:00:00Z in ms
 
-# ---------------------------------------------------------------------------
-# Database client  (tz_aware=True so PyMongo returns aware datetimes)
-# ---------------------------------------------------------------------------
+# Database client (tz_aware=True ensures UTC-aware datetimes)
 _MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 _MONGO_DB  = os.getenv("MONGO_DB",  "attendance_db")
 _MONGO_TIMEOUT_MS = int(os.getenv("MONGO_TIMEOUT_MS", "2000"))
@@ -44,12 +38,10 @@ db     = client[_MONGO_DB]
 _indexes_created = False
 
 
-# ---------------------------------------------------------------------------
-# Startup: create indexes idempotently
-# ---------------------------------------------------------------------------
+# Indexes
 def _create_indexes() -> None:
     """Create all required indexes. Safe to call repeatedly."""
-    # employees -----------------------------------------------------------------
+    # employees
     db.employees.create_index(
         [("emp_code", ASCENDING)],
         unique=True,
@@ -68,7 +60,7 @@ def _create_indexes() -> None:
         name="joined_on",
     )
 
-    # attendance_logs -----------------------------------------------------------
+    # attendance_logs
     db.attendance_logs.create_index(
         [("emp_code", ASCENDING), ("date", ASCENDING)],
         unique=True,
@@ -120,9 +112,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-# ---------------------------------------------------------------------------
 # FastAPI application
-# ---------------------------------------------------------------------------
 app = FastAPI(
     title="Employee Attendance & Analytics API",
     version="2.0.0",
@@ -130,9 +120,7 @@ app = FastAPI(
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers: epoch-ms ↔ datetime
-# ---------------------------------------------------------------------------
+# Helpers: epoch-ms and datetime conversions
 def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
     """Ensure a datetime is UTC-aware (handling naive BSON datetimes from PyMongo)."""
     if dt is None:
@@ -155,9 +143,7 @@ def from_ms(ms: int) -> datetime:
     return dt.replace(microsecond=0)
 
 
-# ---------------------------------------------------------------------------
-# Helper: IST attendance date (R1 — overnight shift logic)
-# ---------------------------------------------------------------------------
+# Helper: IST attendance date (Rule R1: overnight shift logic)
 def attendance_date(punch_in_utc: datetime, shift_start: str, shift_end: str) -> str:
     """
     Return the attendance date string (YYYY-MM-DD, IST) for a punch-in timestamp.
@@ -181,9 +167,7 @@ def attendance_date(punch_in_utc: datetime, shift_start: str, shift_end: str) ->
     return ist_dt.date().isoformat()
 
 
-# ---------------------------------------------------------------------------
 # Helpers: business-rule computations
-# ---------------------------------------------------------------------------
 def round_half_up(value: float, places: int = 2) -> float:
     """Round a float half-up to the given number of decimal places (R4, R8)."""
     quantizer = Decimal(10) ** -places
@@ -240,9 +224,7 @@ def compute_half_day(work_hours: float) -> bool:
     return work_hours < 4.50
 
 
-# ---------------------------------------------------------------------------
-# Response serialisation helpers
-# ---------------------------------------------------------------------------
+# Response serialization helpers
 def _dt_to_ms(val) -> Optional[int]:
     """Convert a datetime to epoch ms, or return None for None."""
     if val is None:
@@ -301,17 +283,13 @@ def serialise_attendance(doc: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Custom Pydantic types
-# ---------------------------------------------------------------------------
 EpochMillis = Annotated[
     int,
     Field(strict=True, ge=_EPOCH_MIN, le=_EPOCH_MAX, description="Epoch milliseconds"),
 ]
 
-# ---------------------------------------------------------------------------
 # Pydantic models
-# ---------------------------------------------------------------------------
 _SHIFT_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
 _EMPCODE_PATTERN = r"^EMP\d{4,6}$"
 _EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -365,16 +343,11 @@ class RegularizeIn(BaseModel):
         return data
 
 
-# ---------------------------------------------------------------------------
 # Endpoints
-# ---------------------------------------------------------------------------
 
 @app.get("/health")
 def health():
-    """
-    D-01: ping MongoDB and ensure required indexes exist;
-    503 if unreachable or index creation fails.
-    """
+    """Ping MongoDB and ensure required indexes exist; return 503 if unreachable."""
     try:
         client.admin.command("ping")
         ensure_indexes()
@@ -383,17 +356,9 @@ def health():
         return JSONResponse(status_code=503, content={"detail": "MongoDB unavailable"})
 
 
-# ---- Employees ------------------------------------------------------------
-
 @app.post("/employees", status_code=201)
 def create_employee(body: EmployeeIn):
-    """
-    D-15: use UTC-aware datetime for created_at.
-    D-16: serialise created_at as epoch ms in the response.
-    D-20: shift_start != shift_end validated by model.
-    D-21: emp_code pattern validated by model.
-    D-08 equivalent: unique index ensures concurrent duplicate → one 201, rest 409.
-    """
+    """Create an employee profile with unique emp_code constraint."""
     ensure_indexes()
     doc = body.model_dump()
     doc["created_at"] = datetime.now(timezone.utc)
@@ -409,25 +374,20 @@ def create_employee(body: EmployeeIn):
 def list_employees(
     department: Optional[str] = None,
     page:       int           = Query(default=1, ge=1),
-    page_size:  int           = Query(default=20, ge=1, le=100),  # D-23: max 100
+    page_size:  int           = Query(default=20, ge=1, le=100),
 ):
-    """
-    D-02: correct skip = (page-1)*page_size.
-    D-03: count_documents uses the same filter as the query.
-    D-04: sorted by emp_code ascending.
-    D-23: page_size capped at 100 (R10).
-    """
+    """List employees with optional department filter and pagination."""
     ensure_indexes()
     q = {}
     if department:
         q["department"] = department
 
-    total = db.employees.count_documents(q)        # D-03 fixed
-    skip  = (page - 1) * page_size                 # D-02 fixed
+    total = db.employees.count_documents(q)
+    skip  = (page - 1) * page_size
     items = list(
         db.employees
         .find(q, {"_id": 0})
-        .sort("emp_code", ASCENDING)               # D-04 fixed
+        .sort("emp_code", ASCENDING)
         .skip(skip)
         .limit(page_size)
     )
@@ -439,31 +399,24 @@ def list_employees(
     }
 
 
-# ---- Attendance: punch-in -------------------------------------------------
-
 @app.post("/attendance/punch-in", status_code=201)
 def punch_in(body: PunchInIn):
     """
-    D-05: UTC-aware timestamps throughout.
-    D-06: explicit 404 for unknown employee.
-    D-07: IST attendance date with R1 overnight-shift rule.
-    D-08: atomic insert; DuplicateKeyError → 409 (no check-then-insert).
-    D-12: corrected late_minutes computation (seconds threshold + IST reference).
-    D-19: punched_at validated as epoch-ms by EpochMillis type.
-    D-24: no spurious 'id' field in response.
+    Record attendance punch-in with IST date calculation and overnight-shift handling (R1).
+    Atomic insertion enforces unique (emp_code, date) constraint with 409 Conflict.
     """
     ensure_indexes()
     emp = db.employees.find_one({"emp_code": body.emp_code})
-    if not emp:                                    # D-06 fixed
+    if not emp:
         raise HTTPException(404, "employee not found")
 
     # Build truncated UTC-aware punch-in datetime (R1: truncate to seconds)
     if body.punched_at is not None:
-        ts = from_ms(body.punched_at)              # D-05 fixed
+        ts = from_ms(body.punched_at)
     else:
         ts = datetime.now(timezone.utc).replace(microsecond=0)
 
-    d = attendance_date(ts, emp["shift_start"], emp["shift_end"])  # D-07 fixed
+    d = attendance_date(ts, emp["shift_start"], emp["shift_end"])
 
     doc = {
         "emp_code":         body.emp_code,
@@ -472,22 +425,20 @@ def punch_in(body: PunchInIn):
         "punch_in":         ts,
         "punch_out":        None,
         "work_hours":       None,
-        "late_minutes":     compute_late_minutes(ts, emp["shift_start"], d),  # D-12 fixed
+        "late_minutes":     compute_late_minutes(ts, emp["shift_start"], d),
         "overtime_minutes": 0,
         "half_day":         False,
         "history":          [],
     }
 
     try:
-        db.attendance_logs.insert_one(doc)         # D-08 fixed: no pre-check
+        db.attendance_logs.insert_one(doc)
     except DuplicateKeyError:
         raise HTTPException(409, "already punched in for this date")
 
     doc.pop("_id", None)
-    return serialise_attendance(doc)              # D-16/D-24 fixed: epoch ms, no id
+    return serialise_attendance(doc)
 
-
-# ---- Attendance: punch-out ------------------------------------------------
 
 @app.post("/attendance/punch-out")
 def punch_out(body: PunchOutIn):
@@ -559,8 +510,6 @@ def punch_out(body: PunchOutIn):
     return serialise_attendance(updated)
 
 
-# ---- Attendance: list ------------------------------------------------------
-
 _DATE_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$")
 _MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
@@ -621,15 +570,11 @@ def list_attendance(
     date_to:   Optional[str] = None,
     status:    Optional[Literal["PRESENT", "ABSENT", "LEAVE", "WFH", "ON_DUTY"]] = None,
     page:      int           = Query(default=1, ge=1),
-    page_size: int           = Query(default=20, ge=1, le=100),  # D-23: max 100
+    page_size: int           = Query(default=20, ge=1, le=100),
 ):
     """
-    D-09: DB-side sort/skip/limit; never loads collection into memory.
-    D-10: sort by date desc, emp_code asc.
-    D-11: total from count_documents(q).
-    D-17: no spurious 'id' field; _id projected out.
-    D-22: date_from > date_to → 422.
-    D-23: page_size capped at 100.
+    List attendance records with filtering, compound sorting (date DESC, emp_code ASC),
+    and database-level pagination.
     """
     ensure_indexes()
     coll, q, sort_spec, skip, limit = _build_attendance_list_query(
@@ -641,13 +586,13 @@ def list_attendance(
         page_size=page_size,
     )
 
-    total = db[coll].count_documents(q)  # D-11 fixed
+    total = db[coll].count_documents(q)
 
     docs = list(
         db[coll]
-        .find(q, {"_id": 0})                       # D-17 fixed: _id excluded
-        .sort(sort_spec)                           # D-10 fixed
-        .skip(skip)                                # D-09 fixed: DB-side
+        .find(q, {"_id": 0})
+        .sort(sort_spec)
+        .skip(skip)
         .limit(limit)
     )
 
@@ -658,8 +603,6 @@ def list_attendance(
         "page_size": page_size,
     }
 
-
-# ---- Attendance: regularize ------------------------------------------------
 
 @app.patch("/attendance/{emp_code}/{date}")
 def regularize_attendance(emp_code: str, date: str, body: RegularizeIn):
@@ -791,9 +734,7 @@ def regularize_attendance(emp_code: str, date: str, body: RegularizeIn):
     return serialise_attendance(updated)
 
 
-# ---------------------------------------------------------------------------
-# Phase 3: Analytics Endpoints
-# ---------------------------------------------------------------------------
+# Analytics Endpoints
 
 def _build_employee_monthly_pipeline(emp_code: str, month: str) -> tuple[str, list[dict], int, int]:
     """Build aggregation pipeline for employee_monthly endpoint."""
@@ -1693,9 +1634,7 @@ def get_department_trend(
     return {"department": department, "items": items}
 
 
-# ---------------------------------------------------------------------------
-# Phase 4: Query Explanation Endpoint
-# ---------------------------------------------------------------------------
+# Query Explanation Endpoint
 
 ExplainEndpointName = Literal[
     "attendance_list",
@@ -1762,7 +1701,7 @@ def explain_endpoint(
     page_size: Optional[int] = Query(default=20, ge=1, le=100),
 ):
     """
-    Phase 4: Runs MongoDB explain('executionStats') for the requested endpoint's
+    Runs MongoDB explain('executionStats') for the requested endpoint's
     main query or aggregation pipeline.
     Reuses the exact query/pipeline builder logic as the corresponding endpoint.
     Missing required parameters return HTTP 422.
