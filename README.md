@@ -1,4 +1,4 @@
-# HROne Employee Attendance & Analytics API
+# Employee Attendance & Analytics API
 
 A high-performance, contract-compliant REST API for employee management, attendance lifecycle tracking, and workforce analytics built with FastAPI, PyMongo, and MongoDB.
 
@@ -6,7 +6,7 @@ A high-performance, contract-compliant REST API for employee management, attenda
 
 ## Overview & Core Capabilities
 
-The HROne Attendance & Analytics API provides an enterprise-ready attendance tracking and reporting engine designed to handle high concurrency and large data volumes:
+The Attendance & Analytics API provides an enterprise-ready attendance tracking and reporting engine designed to handle high concurrency and large data volumes:
 
 - **Employee Lifecycle Management:** Employee onboarding with unique identifiers, shift definitions, and department assignments.
 - **Atomic Attendance Tracking:** Race-condition-free punch-in and punch-out operations backed by database-level unique constraints and atomic operations.
